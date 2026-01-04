@@ -223,8 +223,15 @@ app.post('/lookup', async (req, res) => {
       console.log(`[Lookup] Searching page ${pageNumber} (${clients.length} clients)`);
 
       client = clients.find(c => {
+        // Check primaryPhoneNumber
         const clientPhone = normalizePhone(c.primaryPhoneNumber);
-        return clientPhone === cleanPhone;
+        if (clientPhone === cleanPhone) return true;
+
+        // Also check phoneNumbers array
+        if (c.phoneNumbers && c.phoneNumbers.length > 0) {
+          return c.phoneNumbers.some(p => normalizePhone(p.number) === cleanPhone);
+        }
+        return false;
       });
 
       pageNumber++;
