@@ -341,7 +341,7 @@ app.get('/health', (req, res) => res.json({
   }))
 }));
 
-// Debug endpoint - search CDC for phone
+// Debug endpoint - examine CDC structure
 app.get('/debug', async (req, res) => {
   try {
     const phone = normalizePhone(req.query.phone || '7571234999');
@@ -355,33 +355,34 @@ app.get('/debug', async (req, res) => {
 
     const changes = cdcRes.data.data || cdcRes.data || [];
 
-    // Find our client in CDC
-    const found = changes.find(c => {
-      const clientPhone = normalizePhone(c.primaryPhoneNumber || (c.phoneNumbers?.[0]?.number));
-      return clientPhone === phone;
-    });
+    // Get the actual client data from nested structure
+    const clients = changes.map(c => c.Client_T || c).filter(c => c);
 
-    // Also show latest entries to see structure
-    const latest = changes.slice(-5);
+    // Find by phone
+    const found = clients.find(c => {
+      const p = normalizePhone(c.PrimaryPhoneNumber || c.primaryPhoneNumber || '');
+      return p === phone;
+    });
 
     res.json({
       total_changes: changes.length,
       search_phone: phone,
       found: found ? {
-        id: found.clientId,
-        name: (found.firstName || '') + ' ' + (found.lastName || ''),
-        phone: found.primaryPhoneNumber,
-        phones: found.phoneNumbers
+        id: found.ClientId || found.clientId,
+        name: (found.FirstName || found.firstName || '') + ' ' + (found.LastName || found.lastName || ''),
+        phone: found.PrimaryPhoneNumber || found.primaryPhoneNumber
       } : null,
-      latest_entries: latest.map(c => ({
-        id: c.clientId,
-        name: (c.firstName || '') + ' ' + (c.lastName || ''),
-        phone: c.primaryPhoneNumber
-      })),
-      sample_structure: changes[0] ? Object.keys(changes[0]) : null
+      // Show raw structure of first entry
+      sample_raw: changes[0],
+      // Show last 3 clients
+      latest: clients.slice(-3).map(c => ({
+        id: c.ClientId || c.clientId,
+        name: (c.FirstName || c.firstName || '') + ' ' + (c.LastName || c.lastName || ''),
+        phone: c.PrimaryPhoneNumber || c.primaryPhoneNumber
+      }))
     });
   } catch (err) {
-    res.json({ error: err.message, details: err.response?.data });
+    res.json({ error: err.message });
   }
 });
 
