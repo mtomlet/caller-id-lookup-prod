@@ -341,34 +341,40 @@ app.get('/health', (req, res) => res.json({
   }))
 }));
 
-// Debug endpoint - try phone filter
+// Debug endpoint - try POST search
 app.get('/debug', async (req, res) => {
   try {
-    const phone = req.query.phone;
+    const phone = req.query.phone || '17577123977';
     const authToken = await getToken();
-
-    // Try various filter parameters
-    const urls = [
-      `${CONFIG.API_URL}/clients?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&Phone=${phone}&format=json`,
-      `${CONFIG.API_URL}/clients?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&PrimaryPhone=${phone}&format=json`,
-      `${CONFIG.API_URL}/clients?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&PhoneNumber=${phone}&format=json`,
-      `${CONFIG.API_URL}/clients/search?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&Phone=${phone}&format=json`
-    ];
-
     const results = [];
-    for (const url of urls) {
-      try {
-        const r = await axios.get(url, { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }});
-        const data = r.data.data || r.data;
-        results.push({ url: url.split('?')[0].split('/').pop(), count: Array.isArray(data) ? data.length : 'not array' });
-      } catch (e) {
-        results.push({ url: url.split('?')[0].split('/').pop(), error: e.message });
-      }
+
+    // Try POST search
+    try {
+      const r = await axios.post(
+        `${CONFIG.API_URL}/clients/search?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&format=json`,
+        { phone: phone, primaryPhoneNumber: phone },
+        { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json', 'Content-Type': 'application/json' }}
+      );
+      results.push({ method: 'POST search', data: r.data });
+    } catch (e) {
+      results.push({ method: 'POST search', error: e.message, status: e.response?.status });
+    }
+
+    // Try GET with SearchTerm
+    try {
+      const r = await axios.get(
+        `${CONFIG.API_URL}/clients?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&SearchTerm=${phone}&format=json`,
+        { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }}
+      );
+      const data = r.data.data || r.data;
+      results.push({ method: 'SearchTerm', count: Array.isArray(data) ? data.length : typeof data });
+    } catch (e) {
+      results.push({ method: 'SearchTerm', error: e.message });
     }
 
     res.json({ results });
   } catch (err) {
-    res.json({ success: false, error: err.message });
+    res.json({ error: err.message });
   }
 });
 
