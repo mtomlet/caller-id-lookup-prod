@@ -1,15 +1,11 @@
 /**
- * Caller ID Lookup - TESTBED
+ * Caller ID Lookup - PRODUCTION (Phoenix Encanto)
  *
  * Railway-deployable endpoint for Retell AI inbound webhooks
  * Looks up caller by phone number, returns customer info for dynamic variables
  *
- * TESTBED CREDENTIALS
- * Location: Testbed Location 5
- *
- * IMPORTANT: Meevo /clients list is a cached snapshot that doesn't include
- * recently created clients. This service maintains a local phone cache that
- * gets populated when create_profile creates new clients.
+ * PRODUCTION CREDENTIALS - DO NOT USE FOR TESTING
+ * Location: Keep It Cut - Phoenix Encanto (201664)
  */
 
 const express = require('express');
@@ -18,14 +14,14 @@ const axios = require('axios');
 const app = express();
 app.use(express.json());
 
-// TESTBED Meevo API Configuration
+// PRODUCTION Meevo API Configuration
 const CONFIG = {
-  AUTH_URL: 'https://d18devmarketplace.meevodev.com/oauth2/token',
-  API_URL: 'https://d18devpub.meevodev.com/publicapi/v1',
-  CLIENT_ID: 'a7139b22-775f-4938-8ecb-54aa23a1948d',
-  CLIENT_SECRET: 'b566556f-e65d-47dd-a27d-dd1060d9fe2d',
-  TENANT_ID: '4',
-  LOCATION_ID: '5'
+  AUTH_URL: 'https://marketplace.meevo.com/oauth2/token',
+  API_URL: 'https://na1pub.meevo.com/publicapi/v1',
+  CLIENT_ID: 'f6a5046d-208e-4829-9941-034ebdd2aa65',
+  CLIENT_SECRET: '2f8feb2e-51f5-40a3-83af-3d4a6a454abe',
+  TENANT_ID: '200507',
+  LOCATION_ID: '201664'  // Phoenix Encanto
 };
 
 // In-memory phone cache for recently created clients
@@ -327,7 +323,7 @@ app.post('/lookup', async (req, res) => {
 
 app.get('/health', (req, res) => res.json({
   status: 'ok',
-  environment: 'TESTBED',
+  environment: 'PRODUCTION',
   location_id: CONFIG.LOCATION_ID,
   pagination: 'enabled',
   cache_size: phoneCache.size,
@@ -348,4 +344,4 @@ app.get('/cache', (req, res) => res.json({
 }));
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Caller ID lookup server running on port ${PORT} (TESTBED)`));
+app.listen(PORT, () => console.log(`Caller ID lookup server running on port ${PORT} (PRODUCTION)`));
