@@ -151,14 +151,23 @@ async function findClientByPhone(authToken, phoneToFind) {
   return null;
 }
 
+// Retell AI Inbound Webhook Handler
+// Request: { "event": "call_inbound", "call_inbound": { "from_number": "+1234567890", "to_number": "+0987654321" } }
+// Response: { "call_inbound": { "dynamic_variables": { ... } } }
 app.post('/lookup', async (req, res) => {
   try {
+    console.log('[Webhook] Received:', JSON.stringify(req.body));
+
     const { event, call_inbound } = req.body;
+
+    // Extract phone - Retell sends from_number inside call_inbound object
     const phone = call_inbound?.from_number || req.body.phone;
 
-    if (!phone) {
-      if (event === 'call_inbound') {
-        return res.json({
+    // For Retell inbound webhooks, always return call_inbound response format
+    if (event === 'call_inbound') {
+      if (!phone) {
+        console.log('[Webhook] No phone number provided');
+        return res.status(200).json({
           call_inbound: {
             dynamic_variables: {
               existing_customer: 'false',
@@ -170,26 +179,16 @@ app.post('/lookup', async (req, res) => {
           }
         });
       }
-      return res.json({
-        existing_customer: false,
-        first_name: null,
-        last_name: null,
-        client_id: null,
-        email: null,
-        phone: null
-      });
-    }
 
-    const cleanPhone = normalizePhone(phone);
-    console.log(`[Lookup] Searching for phone: ${phone} (normalized: ${cleanPhone})`);
+      const cleanPhone = normalizePhone(phone);
+      console.log(`[Lookup] Searching for phone: ${phone} (normalized: ${cleanPhone})`);
 
-    const authToken = await getToken();
-    const client = await findClientByPhone(authToken, cleanPhone);
+      const authToken = await getToken();
+      const client = await findClientByPhone(authToken, cleanPhone);
 
-    if (!client) {
-      console.log(`[Lookup] Not found - treating as new customer`);
-      if (event === 'call_inbound') {
-        return res.json({
+      if (!client) {
+        console.log(`[Lookup] Not found - new customer`);
+        return res.status(200).json({
           call_inbound: {
             dynamic_variables: {
               existing_customer: 'false',
@@ -202,20 +201,9 @@ app.post('/lookup', async (req, res) => {
           }
         });
       }
-      return res.json({
-        existing_customer: false,
-        first_name: null,
-        last_name: null,
-        client_id: null,
-        email: null,
-        phone: phone
-      });
-    }
 
-    console.log(`[Lookup] Found: ${client.firstName} ${client.lastName} (via ${client.source})`);
-
-    if (event === 'call_inbound') {
-      return res.json({
+      console.log(`[Lookup] Found: ${client.firstName} ${client.lastName}`);
+      return res.status(200).json({
         call_inbound: {
           dynamic_variables: {
             existing_customer: 'true',
@@ -226,6 +214,33 @@ app.post('/lookup', async (req, res) => {
             phone: client.primaryPhoneNumber || phone
           }
         }
+      });
+    }
+
+    // Non-Retell direct API call (for testing)
+    if (!phone) {
+      return res.json({
+        existing_customer: false,
+        first_name: null,
+        last_name: null,
+        client_id: null,
+        email: null,
+        phone: null
+      });
+    }
+
+    const cleanPhone = normalizePhone(phone);
+    const authToken = await getToken();
+    const client = await findClientByPhone(authToken, cleanPhone);
+
+    if (!client) {
+      return res.json({
+        existing_customer: false,
+        first_name: null,
+        last_name: null,
+        client_id: null,
+        email: null,
+        phone: phone
       });
     }
 
@@ -241,11 +256,13 @@ app.post('/lookup', async (req, res) => {
 
   } catch (error) {
     console.error('[Lookup] Error:', error.message);
-    const { event, call_inbound } = req.body;
-    const phone = call_inbound?.from_number || req.body.phone;
+
+    // Always return valid response for Retell - don't let errors block calls
+    const { event, call_inbound } = req.body || {};
+    const phone = call_inbound?.from_number || req.body?.phone || '';
 
     if (event === 'call_inbound') {
-      return res.json({
+      return res.status(200).json({
         call_inbound: {
           dynamic_variables: {
             existing_customer: 'false',
@@ -253,8 +270,7 @@ app.post('/lookup', async (req, res) => {
             last_name: '',
             client_id: '',
             email: '',
-            phone: phone || '',
-            error: error.message
+            phone: phone
           }
         }
       });
