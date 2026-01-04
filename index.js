@@ -341,43 +341,35 @@ app.get('/health', (req, res) => res.json({
   }))
 }));
 
-// Debug endpoint - search ALL pages
+// Debug endpoint - lookup by client ID directly
 app.get('/debug', async (req, res) => {
   try {
-    const searchPhone = normalizePhone(req.query.phone || '');
+    const clientId = req.query.id;
     const authToken = await getToken();
-    let allClients = [];
-    let page = 1;
 
-    while (page <= 50) {
-      const clientsRes = await axios.get(
-        `${CONFIG.API_URL}/clients?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&PageNumber=${page}&format=json`,
+    if (clientId) {
+      // Direct lookup by ID
+      const clientRes = await axios.get(
+        `${CONFIG.API_URL}/client/${clientId}?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&format=json`,
         { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }}
       );
-      const clients = clientsRes.data.data || clientsRes.data || [];
-      if (!clients.length) break;
-      allClients = allClients.concat(clients);
-      page++;
+      return res.json({ success: true, client: clientRes.data.data || clientRes.data });
     }
 
-    const found = searchPhone ? allClients.find(c => {
-      const primary = normalizePhone(c.primaryPhoneNumber);
-      if (primary === searchPhone) return true;
-      if (c.phoneNumbers) {
-        return c.phoneNumbers.some(p => normalizePhone(p.number) === searchPhone);
-      }
-      return false;
-    }) : null;
+    // List first page
+    const clientsRes = await axios.get(
+      `${CONFIG.API_URL}/clients?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&format=json`,
+      { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }}
+    );
+    const clients = clientsRes.data.data || clientsRes.data || [];
 
     res.json({
       success: true,
-      total_clients: allClients.length,
-      pages: page - 1,
-      search_phone: searchPhone || 'none',
-      found: found ? { name: found.firstName + ' ' + found.lastName, id: found.clientId, phones: found.phoneNumbers } : null
+      count: clients.length,
+      sample: clients.slice(0, 5).map(c => ({ name: c.firstName + ' ' + c.lastName, phone: c.primaryPhoneNumber, id: c.clientId }))
     });
   } catch (err) {
-    res.json({ success: false, error: err.message });
+    res.json({ success: false, error: err.message, data: err.response?.data });
   }
 });
 
