@@ -14,14 +14,14 @@ const axios = require('axios');
 const app = express();
 app.use(express.json());
 
-// PRODUCTION Meevo API Configuration
+// TESTBED Meevo API Configuration
 const CONFIG = {
-  AUTH_URL: 'https://marketplace.meevo.com/oauth2/token',
-  API_URL: 'https://na1pub.meevo.com/publicapi/v1',
-  CLIENT_ID: 'f6a5046d-208e-4829-9941-034ebdd2aa65',
-  CLIENT_SECRET: '2f8feb2e-51f5-40a3-83af-3d4a6a454abe',
-  TENANT_ID: '200507',
-  LOCATION_ID: '201664'  // Phoenix Encanto
+  AUTH_URL: 'https://d18devmarketplace.meevodev.com/oauth2/token',
+  API_URL: 'https://d18devpub.meevodev.com/publicapi/v1',
+  CLIENT_ID: 'a7139b22-775f-4938-8ecb-54aa23a1948d',
+  CLIENT_SECRET: 'b566556f-e65d-47dd-a27d-dd1060d9fe2d',
+  TENANT_ID: '4',
+  LOCATION_ID: '5'
 };
 
 let token = null;
@@ -78,27 +78,42 @@ app.post('/lookup', async (req, res) => {
 
     const authToken = await getToken();
 
-    // Look up client by phone
-    const clientsRes = await axios.get(
-      `${CONFIG.API_URL}/clients?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}`,
-      { headers: { Authorization: `Bearer ${authToken}` }}
-    );
-
-    const clients = clientsRes.data.data || clientsRes.data;
-
     // Clean phone: remove non-digits, then strip leading 1 if 11 digits (US country code)
     let cleanPhone = phone.replace(/\D/g, '');
     if (cleanPhone.length === 11 && cleanPhone.startsWith('1')) {
       cleanPhone = cleanPhone.substring(1);
     }
 
-    const client = clients.find(c => {
-      let clientPhone = (c.primaryPhoneNumber || '').replace(/\D/g, '');
-      if (clientPhone.length === 11 && clientPhone.startsWith('1')) {
-        clientPhone = clientPhone.substring(1);
+    // Look up client by phone - PAGINATE through ALL pages
+    let client = null;
+    let pageNumber = 1;
+    const maxPages = 100; // Safety limit
+
+    while (!client && pageNumber <= maxPages) {
+      const clientsRes = await axios.get(
+        `${CONFIG.API_URL}/clients?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&PageNumber=${pageNumber}`,
+        { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }}
+      );
+
+      const clients = clientsRes.data.data || clientsRes.data;
+
+      if (!clients || clients.length === 0) {
+        console.log(`No more clients at page ${pageNumber}`);
+        break;
       }
-      return clientPhone === cleanPhone;
-    });
+
+      console.log(`Searching page ${pageNumber} (${clients.length} clients)`);
+
+      client = clients.find(c => {
+        let clientPhone = (c.primaryPhoneNumber || '').replace(/\D/g, '');
+        if (clientPhone.length === 11 && clientPhone.startsWith('1')) {
+          clientPhone = clientPhone.substring(1);
+        }
+        return clientPhone === cleanPhone;
+      });
+
+      pageNumber++;
+    }
 
     if (!client) {
       // New customer - return null values
@@ -191,9 +206,9 @@ app.post('/lookup', async (req, res) => {
 
 app.get('/health', (req, res) => res.json({
   status: 'ok',
-  environment: 'PRODUCTION',
-  location: 'Phoenix Encanto',
-  location_id: CONFIG.LOCATION_ID
+  environment: 'TESTBED',
+  location_id: CONFIG.LOCATION_ID,
+  pagination: 'enabled'
 }));
 
 const PORT = process.env.PORT || 3000;
