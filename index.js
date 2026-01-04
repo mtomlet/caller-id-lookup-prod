@@ -341,35 +341,34 @@ app.get('/health', (req, res) => res.json({
   }))
 }));
 
-// Debug endpoint - lookup by client ID directly
+// Debug endpoint - try phone filter
 app.get('/debug', async (req, res) => {
   try {
-    const clientId = req.query.id;
+    const phone = req.query.phone;
     const authToken = await getToken();
 
-    if (clientId) {
-      // Direct lookup by ID
-      const clientRes = await axios.get(
-        `${CONFIG.API_URL}/client/${clientId}?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&format=json`,
-        { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }}
-      );
-      return res.json({ success: true, client: clientRes.data.data || clientRes.data });
+    // Try various filter parameters
+    const urls = [
+      `${CONFIG.API_URL}/clients?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&Phone=${phone}&format=json`,
+      `${CONFIG.API_URL}/clients?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&PrimaryPhone=${phone}&format=json`,
+      `${CONFIG.API_URL}/clients?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&PhoneNumber=${phone}&format=json`,
+      `${CONFIG.API_URL}/clients/search?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&Phone=${phone}&format=json`
+    ];
+
+    const results = [];
+    for (const url of urls) {
+      try {
+        const r = await axios.get(url, { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }});
+        const data = r.data.data || r.data;
+        results.push({ url: url.split('?')[0].split('/').pop(), count: Array.isArray(data) ? data.length : 'not array' });
+      } catch (e) {
+        results.push({ url: url.split('?')[0].split('/').pop(), error: e.message });
+      }
     }
 
-    // List first page
-    const clientsRes = await axios.get(
-      `${CONFIG.API_URL}/clients?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&format=json`,
-      { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }}
-    );
-    const clients = clientsRes.data.data || clientsRes.data || [];
-
-    res.json({
-      success: true,
-      count: clients.length,
-      sample: clients.slice(0, 5).map(c => ({ name: c.firstName + ' ' + c.lastName, phone: c.primaryPhoneNumber, id: c.clientId }))
-    });
+    res.json({ results });
   } catch (err) {
-    res.json({ success: false, error: err.message, data: err.response?.data });
+    res.json({ success: false, error: err.message });
   }
 });
 
