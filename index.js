@@ -199,40 +199,47 @@ app.post('/lookup', async (req, res) => {
       });
     }
 
-    // STEP 2: Cache miss - search Meevo /clients list (paginated)
-    console.log(`[Lookup] Cache miss, searching Meevo /clients...`);
+    // STEP 2: Search using CDC endpoint (includes newly created clients)
+    console.log(`[Lookup] Searching Meevo CDC for phone: ${cleanPhone}`);
     const authToken = await getToken();
 
     let client = null;
     let pageNumber = 1;
-    const maxPages = 100; // Safety limit
+    const maxPages = 20;
 
     while (!client && pageNumber <= maxPages) {
-      const clientsRes = await axios.get(
-        `${CONFIG.API_URL}/clients?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&PageNumber=${pageNumber}`,
+      const cdcRes = await axios.get(
+        `${CONFIG.API_URL}/cdc/entity/Client/changes?tenantid=${CONFIG.TENANT_ID}&locationid=${CONFIG.LOCATION_ID}&StartDate=2020-01-01&PageNumber=${pageNumber}&format=json`,
         { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }}
       );
 
-      const clients = clientsRes.data.data || clientsRes.data;
+      const changes = cdcRes.data.data || cdcRes.data || [];
+      if (!changes.length) break;
 
-      if (!clients || clients.length === 0) {
-        console.log(`[Lookup] No more clients at page ${pageNumber}`);
-        break;
-      }
+      // Extract Client_T data and search by phone
+      for (const change of changes) {
+        const c = change.Client_T;
+        if (!c || !c.ClientPhone_T) continue;
 
-      console.log(`[Lookup] Searching page ${pageNumber} (${clients.length} clients)`);
+        // Check if any phone matches
+        const phoneMatch = c.ClientPhone_T.some(p =>
+          normalizePhone(p.PhoneNumber) === cleanPhone ||
+          normalizePhone(p.FullPhoneNumber) === cleanPhone
+        );
 
-      client = clients.find(c => {
-        // Check primaryPhoneNumber
-        const clientPhone = normalizePhone(c.primaryPhoneNumber);
-        if (clientPhone === cleanPhone) return true;
-
-        // Also check phoneNumbers array
-        if (c.phoneNumbers && c.phoneNumbers.length > 0) {
-          return c.phoneNumbers.some(p => normalizePhone(p.number) === cleanPhone);
+        if (phoneMatch) {
+          // Convert CDC format to standard format
+          client = {
+            clientId: c.EntityId,
+            firstName: c.FirstName,
+            lastName: c.LastName,
+            emailAddress: c.EmailAddress,
+            primaryPhoneNumber: c.ClientPhone_T[0]?.PhoneNumber
+          };
+          console.log(`[Lookup] Found in CDC page ${pageNumber}: ${c.FirstName} ${c.LastName}`);
+          break;
         }
-        return false;
-      });
+      }
 
       pageNumber++;
     }
