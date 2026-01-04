@@ -341,38 +341,52 @@ app.get('/health', (req, res) => res.json({
   }))
 }));
 
-// Debug endpoint - try POST search
+// Debug endpoint - search ALL pages for a phone
 app.get('/debug', async (req, res) => {
   try {
-    const phone = req.query.phone || '17577123977';
+    const phone = normalizePhone(req.query.phone || '');
     const authToken = await getToken();
-    const results = [];
 
-    // Try POST search
-    try {
-      const r = await axios.post(
-        `${CONFIG.API_URL}/clients/search?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&format=json`,
-        { phone: phone, primaryPhoneNumber: phone },
-        { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json', 'Content-Type': 'application/json' }}
-      );
-      results.push({ method: 'POST search', data: r.data });
-    } catch (e) {
-      results.push({ method: 'POST search', error: e.message, status: e.response?.status });
-    }
+    // Search ALL pages
+    let allClients = [];
+    let page = 1;
+    let foundClient = null;
+    let foundOnPage = null;
 
-    // Try GET with SearchTerm
-    try {
+    while (page <= 100 && !foundClient) {
       const r = await axios.get(
-        `${CONFIG.API_URL}/clients?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&SearchTerm=${phone}&format=json`,
+        `${CONFIG.API_URL}/clients?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&PageNumber=${page}&format=json`,
         { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }}
       );
-      const data = r.data.data || r.data;
-      results.push({ method: 'SearchTerm', count: Array.isArray(data) ? data.length : typeof data });
-    } catch (e) {
-      results.push({ method: 'SearchTerm', error: e.message });
+      const clients = r.data.data || r.data || [];
+      if (!clients.length) break;
+
+      allClients = allClients.concat(clients);
+
+      // Search this page
+      for (const c of clients) {
+        const primary = normalizePhone(c.primaryPhoneNumber);
+        if (primary === phone) {
+          foundClient = c;
+          foundOnPage = page;
+          break;
+        }
+      }
+
+      page++;
     }
 
-    res.json({ results });
+    res.json({
+      searched_pages: page - 1,
+      total_clients: allClients.length,
+      search_phone: phone,
+      found: foundClient ? {
+        name: foundClient.firstName + ' ' + foundClient.lastName,
+        id: foundClient.clientId,
+        phone: foundClient.primaryPhoneNumber,
+        page: foundOnPage
+      } : null
+    });
   } catch (err) {
     res.json({ error: err.message });
   }
