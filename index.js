@@ -341,54 +341,49 @@ app.get('/health', (req, res) => res.json({
   }))
 }));
 
-// Debug endpoint - search ALL pages for a phone
+// Debug endpoint - verify client by ID
 app.get('/debug', async (req, res) => {
   try {
-    const phone = normalizePhone(req.query.phone || '');
+    const clientId = req.query.id || 'a77a7aaf-ed60-4c99-a340-b3c8004b64d1';
     const authToken = await getToken();
 
-    // Search ALL pages
-    let allClients = [];
-    let page = 1;
-    let foundClient = null;
-    let foundOnPage = null;
+    // Direct lookup
+    const directRes = await axios.get(
+      `${CONFIG.API_URL}/client/${clientId}?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&format=json`,
+      { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }}
+    );
+    const direct = directRes.data.data || directRes.data;
 
-    while (page <= 100 && !foundClient) {
-      const r = await axios.get(
-        `${CONFIG.API_URL}/clients?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&PageNumber=${page}&format=json`,
-        { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }}
-      );
-      const clients = r.data.data || r.data || [];
-      if (!clients.length) break;
+    // Also get page 1 of clients
+    const listRes = await axios.get(
+      `${CONFIG.API_URL}/clients?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&format=json`,
+      { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }}
+    );
+    const list = listRes.data.data || listRes.data || [];
 
-      allClients = allClients.concat(clients);
-
-      // Search this page
-      for (const c of clients) {
-        const primary = normalizePhone(c.primaryPhoneNumber);
-        if (primary === phone) {
-          foundClient = c;
-          foundOnPage = page;
-          break;
-        }
-      }
-
-      page++;
-    }
+    // Check if this client is in list
+    const inList = list.find(c => c.clientId === clientId);
 
     res.json({
-      searched_pages: page - 1,
-      total_clients: allClients.length,
-      search_phone: phone,
-      found: foundClient ? {
-        name: foundClient.firstName + ' ' + foundClient.lastName,
-        id: foundClient.clientId,
-        phone: foundClient.primaryPhoneNumber,
-        page: foundOnPage
+      direct_lookup: {
+        found: !!direct,
+        name: direct ? direct.firstName + ' ' + direct.lastName : null,
+        phone: direct?.phoneNumbers?.[0]?.number,
+        primaryPhone: direct?.primaryPhoneNumber
+      },
+      in_clients_list: !!inList,
+      list_count: list.length,
+      newest_in_list: list.length > 0 ? {
+        name: list[list.length-1].firstName + ' ' + list[list.length-1].lastName,
+        id: list[list.length-1].clientId
+      } : null,
+      oldest_in_list: list.length > 0 ? {
+        name: list[0].firstName + ' ' + list[0].lastName,
+        id: list[0].clientId
       } : null
     });
   } catch (err) {
-    res.json({ error: err.message });
+    res.json({ error: err.message, details: err.response?.data });
   }
 });
 
