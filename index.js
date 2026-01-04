@@ -341,44 +341,49 @@ app.get('/health', (req, res) => res.json({
   }))
 }));
 
-// Debug endpoint - examine CDC structure
+// Debug endpoint - search CDC by phone
 app.get('/debug', async (req, res) => {
   try {
     const phone = normalizePhone(req.query.phone || '7571234999');
     const authToken = await getToken();
 
-    // Get CDC changes
-    const cdcRes = await axios.get(
-      `${CONFIG.API_URL}/cdc/entity/Client/changes?tenantid=${CONFIG.TENANT_ID}&locationid=${CONFIG.LOCATION_ID}&StartDate=2026-01-01&format=json`,
-      { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }}
-    );
+    // Get all CDC pages
+    let allClients = [];
+    let page = 1;
+    while (page <= 20) {
+      const cdcRes = await axios.get(
+        `${CONFIG.API_URL}/cdc/entity/Client/changes?tenantid=${CONFIG.TENANT_ID}&locationid=${CONFIG.LOCATION_ID}&StartDate=2026-01-01&PageNumber=${page}&format=json`,
+        { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }}
+      );
+      const changes = cdcRes.data.data || cdcRes.data || [];
+      if (!changes.length) break;
+      allClients = allClients.concat(changes.map(c => c.Client_T).filter(c => c));
+      page++;
+    }
 
-    const changes = cdcRes.data.data || cdcRes.data || [];
-
-    // Get the actual client data from nested structure
-    const clients = changes.map(c => c.Client_T || c).filter(c => c);
-
-    // Find by phone
-    const found = clients.find(c => {
-      const p = normalizePhone(c.PrimaryPhoneNumber || c.primaryPhoneNumber || '');
-      return p === phone;
+    // Search by phone in ClientPhone_T array
+    const found = allClients.find(c => {
+      if (!c.ClientPhone_T) return false;
+      return c.ClientPhone_T.some(p => normalizePhone(p.PhoneNumber) === phone || normalizePhone(p.FullPhoneNumber) === phone);
     });
 
+    // Filter to our location
+    const ourLocation = allClients.filter(c => c.LocationId === 201664 || c.HomeLocationId === 201664);
+
     res.json({
-      total_changes: changes.length,
+      total_clients: allClients.length,
+      pages_fetched: page - 1,
+      our_location_count: ourLocation.length,
       search_phone: phone,
       found: found ? {
-        id: found.ClientId || found.clientId,
-        name: (found.FirstName || found.firstName || '') + ' ' + (found.LastName || found.lastName || ''),
-        phone: found.PrimaryPhoneNumber || found.primaryPhoneNumber
+        id: found.EntityId,
+        name: found.FirstName + ' ' + found.LastName,
+        location: found.LocationId,
+        phones: found.ClientPhone_T
       } : null,
-      // Show raw structure of first entry
-      sample_raw: changes[0],
-      // Show last 3 clients
-      latest: clients.slice(-3).map(c => ({
-        id: c.ClientId || c.clientId,
-        name: (c.FirstName || c.firstName || '') + ' ' + (c.LastName || c.lastName || ''),
-        phone: c.PrimaryPhoneNumber || c.primaryPhoneNumber
+      our_location_sample: ourLocation.slice(0, 3).map(c => ({
+        name: c.FirstName + ' ' + c.LastName,
+        phone: c.ClientPhone_T?.[0]?.PhoneNumber
       }))
     });
   } catch (err) {
