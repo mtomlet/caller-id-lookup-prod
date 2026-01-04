@@ -341,14 +341,43 @@ app.get('/health', (req, res) => res.json({
   }))
 }));
 
-// Debug endpoint to view cache
-app.get('/cache', (req, res) => res.json({
-  size: phoneCache.size,
-  entries: Array.from(phoneCache.entries()).map(([phone, data]) => ({
-    phone,
-    ...data
-  }))
-}));
+// Debug endpoint - test Meevo connection and search
+app.get('/debug', async (req, res) => {
+  try {
+    const searchPhone = normalizePhone(req.query.phone || '');
+    const authToken = await getToken();
+
+    const clientsRes = await axios.get(
+      `${CONFIG.API_URL}/clients?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&format=json`,
+      { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }}
+    );
+
+    const clients = clientsRes.data.data || clientsRes.data || [];
+
+    const found = searchPhone ? clients.find(c => {
+      const primary = normalizePhone(c.primaryPhoneNumber);
+      if (primary === searchPhone) return true;
+      if (c.phoneNumbers) {
+        return c.phoneNumbers.some(p => normalizePhone(p.number) === searchPhone);
+      }
+      return false;
+    }) : null;
+
+    res.json({
+      success: true,
+      client_count: Array.isArray(clients) ? clients.length : 'not array',
+      search_phone: searchPhone || 'none',
+      found: found ? { name: found.firstName + ' ' + found.lastName, id: found.clientId } : null,
+      sample: Array.isArray(clients) ? clients.slice(0, 3).map(c => ({
+        name: c.firstName + ' ' + c.lastName,
+        primary: c.primaryPhoneNumber,
+        phones: c.phoneNumbers
+      })) : null
+    });
+  } catch (err) {
+    res.json({ success: false, error: err.message, response: err.response?.data });
+  }
+});
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Caller ID lookup server running on port ${PORT} (PRODUCTION)`));
