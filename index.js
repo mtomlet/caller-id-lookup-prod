@@ -341,49 +341,43 @@ app.get('/health', (req, res) => res.json({
   }))
 }));
 
-// Debug endpoint - verify client by ID
+// Debug endpoint - try different list parameters
 app.get('/debug', async (req, res) => {
   try {
-    const clientId = req.query.id || 'a77a7aaf-ed60-4c99-a340-b3c8004b64d1';
     const authToken = await getToken();
+    const results = {};
 
-    // Direct lookup
-    const directRes = await axios.get(
-      `${CONFIG.API_URL}/client/${clientId}?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&format=json`,
-      { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }}
-    );
-    const direct = directRes.data.data || directRes.data;
+    // Try different sort/filter parameters
+    const params = [
+      '',
+      'SortBy=dateCreated',
+      'SortOrder=desc',
+      'SortBy=clientNumericId&SortOrder=desc',
+      'OrderBy=dateCreated desc',
+      'IncludeInactive=true',
+      'ModifiedSince=2026-01-01'
+    ];
 
-    // Also get page 1 of clients
-    const listRes = await axios.get(
-      `${CONFIG.API_URL}/clients?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&format=json`,
-      { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }}
-    );
-    const list = listRes.data.data || listRes.data || [];
+    for (const param of params) {
+      try {
+        const url = `${CONFIG.API_URL}/clients?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&${param}&format=json`;
+        const r = await axios.get(url, { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }});
+        const clients = r.data.data || r.data || [];
+        const hasNewClient = clients.some(c => c.clientId === 'a77a7aaf-ed60-4c99-a340-b3c8004b64d1');
+        results[param || 'default'] = {
+          count: clients.length,
+          has_new_client: hasNewClient,
+          first: clients[0] ? clients[0].firstName + ' ' + clients[0].lastName : null,
+          last: clients[clients.length-1] ? clients[clients.length-1].firstName + ' ' + clients[clients.length-1].lastName : null
+        };
+      } catch (e) {
+        results[param || 'default'] = { error: e.message };
+      }
+    }
 
-    // Check if this client is in list
-    const inList = list.find(c => c.clientId === clientId);
-
-    res.json({
-      direct_lookup: {
-        found: !!direct,
-        name: direct ? direct.firstName + ' ' + direct.lastName : null,
-        phone: direct?.phoneNumbers?.[0]?.number,
-        primaryPhone: direct?.primaryPhoneNumber
-      },
-      in_clients_list: !!inList,
-      list_count: list.length,
-      newest_in_list: list.length > 0 ? {
-        name: list[list.length-1].firstName + ' ' + list[list.length-1].lastName,
-        id: list[list.length-1].clientId
-      } : null,
-      oldest_in_list: list.length > 0 ? {
-        name: list[0].firstName + ' ' + list[0].lastName,
-        id: list[0].clientId
-      } : null
-    });
+    res.json(results);
   } catch (err) {
-    res.json({ error: err.message, details: err.response?.data });
+    res.json({ error: err.message });
   }
 });
 
