@@ -55,56 +55,15 @@ function normalizePhone(phone) {
   return clean;
 }
 
-// Search CDC for recent changes (fast, last 3 days)
-async function searchCDC(authToken, phoneToFind) {
-  const startDate = new Date();
-  startDate.setDate(startDate.getDate() - 3);
-  const dateStr = startDate.toISOString().split('T')[0];
-
+// FAST search - must complete in <8 seconds for Retell's 10s timeout
+// Search /clients endpoint with limited pages for speed
+async function searchClients(authToken, phoneToFind) {
+  // Only search first 10 pages (200 clients) - must be fast!
   for (let page = 1; page <= 10; page++) {
     try {
       const res = await axios.get(
-        `${CONFIG.API_URL}/cdc/entity/Client/changes?tenantid=${CONFIG.TENANT_ID}&locationid=${CONFIG.LOCATION_ID}&StartDate=${dateStr}&PageNumber=${page}&format=json`,
-        { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' } }
-      );
-
-      const data = res.data.data || [];
-      if (data.length === 0) break;
-
-      for (const change of data) {
-        const c = change.Client_T;
-        if (!c || !c.ClientPhone_T) continue;
-
-        for (const phone of c.ClientPhone_T) {
-          const phoneNum = normalizePhone(phone.PhoneNumber || phone.FullPhoneNumber);
-          if (phoneNum === phoneToFind) {
-            return {
-              clientId: c.EntityId,
-              firstName: c.FirstName,
-              lastName: c.LastName,
-              emailAddress: c.EmailAddress,
-              primaryPhoneNumber: phoneNum,
-              source: 'cdc'
-            };
-          }
-        }
-      }
-    } catch (err) {
-      console.log(`[CDC] Error on page ${page}:`, err.message);
-      break;
-    }
-  }
-  return null;
-}
-
-// Search /clients endpoint with pagination
-// NOTE: Meevo returns DIFFERENT results based on ItemsPerPage! Using 20 for consistency.
-async function searchClients(authToken, phoneToFind, maxPages = 250) {
-  for (let page = 1; page <= maxPages; page++) {
-    try {
-      const res = await axios.get(
         `${CONFIG.API_URL}/clients?tenantid=${CONFIG.TENANT_ID}&locationid=${CONFIG.LOCATION_ID}&PageNumber=${page}&ItemsPerPage=20`,
-        { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' } }
+        { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }, timeout: 5000 }
       );
 
       const clients = res.data.data || [];
@@ -117,8 +76,7 @@ async function searchClients(authToken, phoneToFind, maxPages = 250) {
             firstName: c.firstName,
             lastName: c.lastName,
             emailAddress: c.emailAddress,
-            primaryPhoneNumber: c.primaryPhoneNumber,
-            source: 'clients'
+            primaryPhoneNumber: c.primaryPhoneNumber
           };
         }
       }
@@ -130,25 +88,14 @@ async function searchClients(authToken, phoneToFind, maxPages = 250) {
   return null;
 }
 
-// Combined search: CDC first (fast), then /clients (comprehensive)
+// Quick lookup - must respond within Retell's 10 second timeout
 async function findClientByPhone(authToken, phoneToFind) {
-  // Step 1: Search CDC for recent changes (fast)
-  console.log(`[Search] Checking CDC for recent changes...`);
-  let client = await searchCDC(authToken, phoneToFind);
+  console.log(`[Search] Quick search for: ${phoneToFind}`);
+  const client = await searchClients(authToken, phoneToFind);
   if (client) {
-    console.log(`[Search] Found in CDC: ${client.firstName} ${client.lastName}`);
-    return client;
+    console.log(`[Search] Found: ${client.firstName} ${client.lastName}`);
   }
-
-  // Step 2: Search /clients endpoint (max 250 pages × 20 per page = 5000 clients)
-  console.log(`[Search] Checking /clients endpoint...`);
-  client = await searchClients(authToken, phoneToFind, 250);
-  if (client) {
-    console.log(`[Search] Found in /clients: ${client.firstName} ${client.lastName}`);
-    return client;
-  }
-
-  return null;
+  return client;
 }
 
 // Retell AI Inbound Webhook Handler
