@@ -341,20 +341,26 @@ app.get('/health', (req, res) => res.json({
   }))
 }));
 
-// Debug endpoint - test Meevo connection and search
+// Debug endpoint - search ALL pages
 app.get('/debug', async (req, res) => {
   try {
     const searchPhone = normalizePhone(req.query.phone || '');
     const authToken = await getToken();
+    let allClients = [];
+    let page = 1;
 
-    const clientsRes = await axios.get(
-      `${CONFIG.API_URL}/clients?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&format=json`,
-      { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }}
-    );
+    while (page <= 50) {
+      const clientsRes = await axios.get(
+        `${CONFIG.API_URL}/clients?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&PageNumber=${page}&format=json`,
+        { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }}
+      );
+      const clients = clientsRes.data.data || clientsRes.data || [];
+      if (!clients.length) break;
+      allClients = allClients.concat(clients);
+      page++;
+    }
 
-    const clients = clientsRes.data.data || clientsRes.data || [];
-
-    const found = searchPhone ? clients.find(c => {
+    const found = searchPhone ? allClients.find(c => {
       const primary = normalizePhone(c.primaryPhoneNumber);
       if (primary === searchPhone) return true;
       if (c.phoneNumbers) {
@@ -365,17 +371,13 @@ app.get('/debug', async (req, res) => {
 
     res.json({
       success: true,
-      client_count: Array.isArray(clients) ? clients.length : 'not array',
+      total_clients: allClients.length,
+      pages: page - 1,
       search_phone: searchPhone || 'none',
-      found: found ? { name: found.firstName + ' ' + found.lastName, id: found.clientId } : null,
-      sample: Array.isArray(clients) ? clients.slice(0, 3).map(c => ({
-        name: c.firstName + ' ' + c.lastName,
-        primary: c.primaryPhoneNumber,
-        phones: c.phoneNumbers
-      })) : null
+      found: found ? { name: found.firstName + ' ' + found.lastName, id: found.clientId, phones: found.phoneNumbers } : null
     });
   } catch (err) {
-    res.json({ success: false, error: err.message, response: err.response?.data });
+    res.json({ success: false, error: err.message });
   }
 });
 
