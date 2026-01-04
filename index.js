@@ -341,37 +341,47 @@ app.get('/health', (req, res) => res.json({
   }))
 }));
 
-// Debug endpoint - try CDC endpoint
+// Debug endpoint - search CDC for phone
 app.get('/debug', async (req, res) => {
   try {
+    const phone = normalizePhone(req.query.phone || '7571234999');
     const authToken = await getToken();
-    const results = {};
 
-    // Try CDC endpoint for recent changes
-    const cdcUrls = [
-      `${CONFIG.API_URL}/cdc/entity/Client/changes?tenantid=${CONFIG.TENANT_ID}&locationid=${CONFIG.LOCATION_ID}&StartDate=2026-01-03&format=json`,
-      `${CONFIG.API_URL}/cdc/Client/changes?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&format=json`,
-      `${CONFIG.API_URL}/clients/changes?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&format=json`,
-      `${CONFIG.API_URL}/client/changes?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&format=json`
-    ];
+    // Get CDC changes
+    const cdcRes = await axios.get(
+      `${CONFIG.API_URL}/cdc/entity/Client/changes?tenantid=${CONFIG.TENANT_ID}&locationid=${CONFIG.LOCATION_ID}&StartDate=2026-01-01&format=json`,
+      { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }}
+    );
 
-    for (const url of cdcUrls) {
-      try {
-        const r = await axios.get(url, { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }});
-        const data = r.data.data || r.data;
-        results[url.split('/').slice(-2).join('/')] = {
-          success: true,
-          count: Array.isArray(data) ? data.length : 'not array',
-          sample: Array.isArray(data) && data[0] ? { name: data[0].firstName + ' ' + data[0].lastName } : data
-        };
-      } catch (e) {
-        results[url.split('/').slice(-2).join('/')] = { error: e.message, status: e.response?.status };
-      }
-    }
+    const changes = cdcRes.data.data || cdcRes.data || [];
 
-    res.json(results);
+    // Find our client in CDC
+    const found = changes.find(c => {
+      const clientPhone = normalizePhone(c.primaryPhoneNumber || (c.phoneNumbers?.[0]?.number));
+      return clientPhone === phone;
+    });
+
+    // Also show latest entries to see structure
+    const latest = changes.slice(-5);
+
+    res.json({
+      total_changes: changes.length,
+      search_phone: phone,
+      found: found ? {
+        id: found.clientId,
+        name: (found.firstName || '') + ' ' + (found.lastName || ''),
+        phone: found.primaryPhoneNumber,
+        phones: found.phoneNumbers
+      } : null,
+      latest_entries: latest.map(c => ({
+        id: c.clientId,
+        name: (c.firstName || '') + ' ' + (c.lastName || ''),
+        phone: c.primaryPhoneNumber
+      })),
+      sample_structure: changes[0] ? Object.keys(changes[0]) : null
+    });
   } catch (err) {
-    res.json({ error: err.message });
+    res.json({ error: err.message, details: err.response?.data });
   }
 });
 
