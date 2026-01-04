@@ -55,22 +55,40 @@ function normalizePhone(phone) {
   return clean;
 }
 
-// FAST search - must complete in <8 seconds for Retell's 10s timeout
-// Search /clients endpoint with limited pages for speed
+// PARALLEL search - search many pages concurrently to find clients fast
+// Searches up to 20,000 clients (200 pages x 100 per page) in batches
 async function searchClients(authToken, phoneToFind) {
-  // Only search first 10 pages (200 clients) - must be fast!
-  for (let page = 1; page <= 10; page++) {
-    try {
-      const res = await axios.get(
-        `${CONFIG.API_URL}/clients?tenantid=${CONFIG.TENANT_ID}&locationid=${CONFIG.LOCATION_ID}&PageNumber=${page}&ItemsPerPage=20`,
-        { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }, timeout: 5000 }
-      );
+  const PAGES_PER_BATCH = 10;  // 10 concurrent requests
+  const ITEMS_PER_PAGE = 100;  // 100 clients per page
+  const MAX_BATCHES = 20;      // 20 batches = 200 pages = 20,000 clients
 
-      const clients = res.data.data || [];
-      if (clients.length === 0) break;
+  for (let batch = 0; batch < MAX_BATCHES; batch++) {
+    const startPage = batch * PAGES_PER_BATCH + 1;
+    const pagePromises = [];
+
+    // Launch 10 parallel requests
+    for (let i = 0; i < PAGES_PER_BATCH; i++) {
+      const page = startPage + i;
+      pagePromises.push(
+        axios.get(
+          `${CONFIG.API_URL}/clients?tenantid=${CONFIG.TENANT_ID}&locationid=${CONFIG.LOCATION_ID}&PageNumber=${page}&ItemsPerPage=${ITEMS_PER_PAGE}`,
+          { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }, timeout: 3000 }
+        ).catch(err => ({ data: { data: [] }, error: err.message }))
+      );
+    }
+
+    // Wait for all 10 pages
+    const results = await Promise.all(pagePromises);
+
+    // Check each page for the phone
+    let emptyPages = 0;
+    for (const res of results) {
+      const clients = res.data?.data || [];
+      if (clients.length === 0) emptyPages++;
 
       for (const c of clients) {
         if (normalizePhone(c.primaryPhoneNumber) === phoneToFind) {
+          console.log(`[Search] Found on batch ${batch + 1}`);
           return {
             clientId: c.clientId,
             firstName: c.firstName,
@@ -80,8 +98,11 @@ async function searchClients(authToken, phoneToFind) {
           };
         }
       }
-    } catch (err) {
-      console.log(`[Clients] Error on page ${page}:`, err.message);
+    }
+
+    // If all pages empty, we've reached the end
+    if (emptyPages === PAGES_PER_BATCH) {
+      console.log(`[Search] End of clients at batch ${batch + 1}`);
       break;
     }
   }
