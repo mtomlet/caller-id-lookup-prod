@@ -341,37 +341,31 @@ app.get('/health', (req, res) => res.json({
   }))
 }));
 
-// Debug endpoint - try different list parameters
+// Debug endpoint - try CDC endpoint
 app.get('/debug', async (req, res) => {
   try {
     const authToken = await getToken();
     const results = {};
 
-    // Try different sort/filter parameters
-    const params = [
-      '',
-      'SortBy=dateCreated',
-      'SortOrder=desc',
-      'SortBy=clientNumericId&SortOrder=desc',
-      'OrderBy=dateCreated desc',
-      'IncludeInactive=true',
-      'ModifiedSince=2026-01-01'
+    // Try CDC endpoint for recent changes
+    const cdcUrls = [
+      `${CONFIG.API_URL}/cdc/entity/Client/changes?tenantid=${CONFIG.TENANT_ID}&locationid=${CONFIG.LOCATION_ID}&StartDate=2026-01-03&format=json`,
+      `${CONFIG.API_URL}/cdc/Client/changes?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&format=json`,
+      `${CONFIG.API_URL}/clients/changes?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&format=json`,
+      `${CONFIG.API_URL}/client/changes?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&format=json`
     ];
 
-    for (const param of params) {
+    for (const url of cdcUrls) {
       try {
-        const url = `${CONFIG.API_URL}/clients?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}&${param}&format=json`;
         const r = await axios.get(url, { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }});
-        const clients = r.data.data || r.data || [];
-        const hasNewClient = clients.some(c => c.clientId === 'a77a7aaf-ed60-4c99-a340-b3c8004b64d1');
-        results[param || 'default'] = {
-          count: clients.length,
-          has_new_client: hasNewClient,
-          first: clients[0] ? clients[0].firstName + ' ' + clients[0].lastName : null,
-          last: clients[clients.length-1] ? clients[clients.length-1].firstName + ' ' + clients[clients.length-1].lastName : null
+        const data = r.data.data || r.data;
+        results[url.split('/').slice(-2).join('/')] = {
+          success: true,
+          count: Array.isArray(data) ? data.length : 'not array',
+          sample: Array.isArray(data) && data[0] ? { name: data[0].firstName + ' ' + data[0].lastName } : data
         };
       } catch (e) {
-        results[param || 'default'] = { error: e.message };
+        results[url.split('/').slice(-2).join('/')] = { error: e.message, status: e.response?.status };
       }
     }
 
