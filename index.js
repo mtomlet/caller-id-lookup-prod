@@ -348,50 +348,61 @@ app.get('/health', (req, res) => res.json({
   }))
 }));
 
-// Debug endpoint - search CDC by phone
-app.get('/debug', async (req, res) => {
+// Test endpoint - debug the lookup logic
+app.get('/test-lookup', async (req, res) => {
   try {
-    const phone = normalizePhone(req.query.phone || '7571234999');
+    const phone = req.query.phone || '7571234999';
+    const cleanPhone = normalizePhone(phone);
     const authToken = await getToken();
 
-    // Get all CDC pages
-    let allClients = [];
-    let page = 1;
-    while (page <= 20) {
-      const cdcRes = await axios.get(
-        `${CONFIG.API_URL}/cdc/entity/Client/changes?tenantid=${CONFIG.TENANT_ID}&locationid=${CONFIG.LOCATION_ID}&StartDate=2026-01-01&PageNumber=${page}&format=json`,
-        { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }}
-      );
-      const changes = cdcRes.data.data || cdcRes.data || [];
-      if (!changes.length) break;
-      allClients = allClients.concat(changes.map(c => c.Client_T).filter(c => c));
-      page++;
+    let client = null;
+    let pageNumber = 1;
+    let pagesSearched = 0;
+    let error = null;
+
+    while (!client && pageNumber <= 20) {
+      try {
+        const cdcRes = await axios.get(
+          `${CONFIG.API_URL}/cdc/entity/Client/changes?tenantid=${CONFIG.TENANT_ID}&locationid=${CONFIG.LOCATION_ID}&StartDate=2020-01-01&PageNumber=${pageNumber}&format=json`,
+          { headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' }}
+        );
+
+        const changes = cdcRes.data.data || cdcRes.data || [];
+        if (!changes.length) break;
+        pagesSearched = pageNumber;
+
+        for (const change of changes) {
+          const c = change.Client_T;
+          if (!c || !c.ClientPhone_T) continue;
+
+          const phoneMatch = c.ClientPhone_T.some(p =>
+            normalizePhone(p.PhoneNumber) === cleanPhone ||
+            normalizePhone(p.FullPhoneNumber) === cleanPhone
+          );
+
+          if (phoneMatch) {
+            client = {
+              clientId: c.EntityId,
+              firstName: c.FirstName,
+              lastName: c.LastName,
+              emailAddress: c.EmailAddress,
+              primaryPhoneNumber: c.ClientPhone_T[0]?.PhoneNumber
+            };
+            break;
+          }
+        }
+      } catch (e) {
+        error = e.message;
+        break;
+      }
+      pageNumber++;
     }
 
-    // Search by phone in ClientPhone_T array
-    const found = allClients.find(c => {
-      if (!c.ClientPhone_T) return false;
-      return c.ClientPhone_T.some(p => normalizePhone(p.PhoneNumber) === phone || normalizePhone(p.FullPhoneNumber) === phone);
-    });
-
-    // Filter to our location
-    const ourLocation = allClients.filter(c => c.LocationId === 201664 || c.HomeLocationId === 201664);
-
     res.json({
-      total_clients: allClients.length,
-      pages_fetched: page - 1,
-      our_location_count: ourLocation.length,
-      search_phone: phone,
-      found: found ? {
-        id: found.EntityId,
-        name: found.FirstName + ' ' + found.LastName,
-        location: found.LocationId,
-        phones: found.ClientPhone_T
-      } : null,
-      our_location_sample: ourLocation.slice(0, 3).map(c => ({
-        name: c.FirstName + ' ' + c.LastName,
-        phone: c.ClientPhone_T?.[0]?.PhoneNumber
-      }))
+      search_phone: cleanPhone,
+      pages_searched: pagesSearched,
+      error: error,
+      found: client
     });
   } catch (err) {
     res.json({ error: err.message });
